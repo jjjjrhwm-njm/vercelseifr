@@ -7,7 +7,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const urlParts = req.url.split('?')[0].split('/').filter(Boolean);
-  if (urlParts.length < 2) return res.status(200).send("<h1>Najm Engine Active 🚀</h1>");
+  if (urlParts.length < 2) return res.status(200).send("<h1>Najm Engine v6.0 Active 🚀</h1>");
 
   const userId = decodeURIComponent(urlParts[0]);
   const projName = decodeURIComponent(urlParts[1]);
@@ -30,7 +30,7 @@ export default async function handler(req, res) {
       }
     }
 
-    if (!targetMessage) return res.status(404).send("<h1>Project Not Found</h1>");
+    if (!targetMessage) return res.status(404).send("<h1>Project Not Found In Telegram Channel</h1>");
 
     const codeMatch = targetMessage.match(/\[START_CODE\]([\s\S]*?)\[END_CODE\]/);
     const varsMatch = targetMessage.match(/\[START_VARS\]([\s\S]*?)\[END_VARS\]/);
@@ -40,11 +40,10 @@ export default async function handler(req, res) {
     const cleanCode = decodeHtml(codeMatch[1]).trim();
     const secrets = varsMatch ? JSON.parse(decodeHtml(varsMatch[1]).trim()) : {};
 
-    // 🚀 التعديل الجوهري هنا: بناء الرابط الكامل يدوياً لضمان قبوله في تليجرام
-    const protocol = 'https'; 
-    const fullUrl = `${protocol}://${req.headers.host}${req.url}`;
+    // 🚀 بناء الرابط الكامل غصب عن فيرسل
+    const protocol = 'https';
+    const fullUrl = protocol + '://' + req.headers.host + req.url;
 
-    // إنشاء كائن طلب يحتوي على الرابط الكامل
     const webReq = {
         url: fullUrl,
         method: req.method,
@@ -52,9 +51,8 @@ export default async function handler(req, res) {
         json: async () => req.body
     };
 
-    const execute = new Function('env', 'project', 'request', 'Response', 'fetch', `return (async () => { \n${cleanCode}\n })();`);
-    
-    // تمرير webReq بدلاً من Request الأصلي لضمان توفر خاصية .url بشكل سليم
+    // تشغيل الكود
+    const execute = new Function('env', 'project', 'request', 'Response', 'fetch', "return (async () => { " + cleanCode + " })();");
     const result = await execute(secrets, { user_id: userId, name: projName }, webReq, Response, fetch);
     
     if (result instanceof Response) {
@@ -62,10 +60,10 @@ export default async function handler(req, res) {
         result.headers.forEach((v, k) => res.setHeader(k, v));
         return res.status(result.status).send(text);
     }
-    return res.status(200).send(result || "Done");
+    return res.status(200).send(result || "Executed");
 
   } catch (e) {
-    return res.status(500).send(`<h2>خطأ المحرك: ${e.message}</h2>`);
+    return res.status(500).send("<h2>خطأ في التنفيذ: " + e.message + "</h2>");
   }
 }
 
