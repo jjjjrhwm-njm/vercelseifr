@@ -7,7 +7,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const urlParts = req.url.split('?')[0].split('/').filter(Boolean);
-  if (urlParts.length < 2) return res.status(200).send("<h1>Najm Engine Vercel v5.0 Active</h1>");
+  if (urlParts.length < 2) return res.status(200).send("<h1>Najm Engine Active 🚀</h1>");
 
   const userId = decodeURIComponent(urlParts[0]);
   const projName = decodeURIComponent(urlParts[1]);
@@ -32,22 +32,29 @@ export default async function handler(req, res) {
 
     if (!targetMessage) return res.status(404).send("<h1>Project Not Found</h1>");
 
-    // البحث بين العلامات الجديدة الصلبة
     const codeMatch = targetMessage.match(/\[START_CODE\]([\s\S]*?)\[END_CODE\]/);
     const varsMatch = targetMessage.match(/\[START_VARS\]([\s\S]*?)\[END_VARS\]/);
     
-    if (!codeMatch) throw new Error("لم يتم العثور على منطقة الكود [START_CODE]");
+    if (!codeMatch) throw new Error("لم يتم العثور على [START_CODE]");
 
     const cleanCode = decodeHtml(codeMatch[1]).trim();
     const secrets = varsMatch ? JSON.parse(decodeHtml(varsMatch[1]).trim()) : {};
 
-    // تحويل الطلب
-    const protocol = req.headers['x-forwarded-proto'] || 'https';
-    const webReq = new Request(`${protocol}://${req.headers.host}${req.url}`, {
-        method: req.method, headers: req.headers, body: req.method === 'POST' ? JSON.stringify(req.body) : undefined
-    });
+    // 🚀 التعديل الجوهري هنا: بناء الرابط الكامل يدوياً لضمان قبوله في تليجرام
+    const protocol = 'https'; 
+    const fullUrl = `${protocol}://${req.headers.host}${req.url}`;
+
+    // إنشاء كائن طلب يحتوي على الرابط الكامل
+    const webReq = {
+        url: fullUrl,
+        method: req.method,
+        headers: req.headers,
+        json: async () => req.body
+    };
 
     const execute = new Function('env', 'project', 'request', 'Response', 'fetch', `return (async () => { \n${cleanCode}\n })();`);
+    
+    // تمرير webReq بدلاً من Request الأصلي لضمان توفر خاصية .url بشكل سليم
     const result = await execute(secrets, { user_id: userId, name: projName }, webReq, Response, fetch);
     
     if (result instanceof Response) {
