@@ -6,22 +6,17 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   // استخراج اسم المطور واسم المشروع من الرابط
   const urlParts = req.url.split('?')[0].split('/').filter(Boolean);
   
-  if (urlParts.length < 2) {
-      return res.status(200).send("<body style='background:#0f1020; color:#00d2ff; text-align:center; padding:50px; font-family:monospace;'><h1>🚀 محرك نجم Vercel يعمل بنجاح!</h1></body>");
-  }
+  if (urlParts.length < 2) return res.status(200).send("<body style='background:#0f1020; color:#00d2ff; text-align:center; padding:50px; font-family:monospace;'><h1>🚀 محرك نجم Vercel يعمل بنجاح!</h1></body>");
 
   const userId = decodeURIComponent(urlParts[0]);
   const projName = decodeURIComponent(urlParts[1]);
 
   try {
-    // جلب الأكواد من تليجرام
     const fetchRes = await fetch(TELEGRAM_URL, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     const html = await fetchRes.text();
     const messages = html.split('<div class="tgme_widget_message_text').reverse();
@@ -42,14 +37,13 @@ export default async function handler(req, res) {
       }
     }
 
-    if (!targetMessage) {
-        return res.status(404).send(`<body style='background:#0f1020; color:#ff3366; text-align:center; padding:50px; font-family:monospace;'><h1>❌ المشروع [${projName}] غير موجود</h1></body>`);
-    }
+    if (!targetMessage) return res.status(404).send(`<body style='background:#0f1020; color:#ff3366; text-align:center; padding:50px; font-family:monospace;'><h1>❌ المشروع [${projName}] غير موجود</h1></body>`);
 
-    const codeMatch = targetMessage.match(/<code>([\s\S]*?)<\/code>/);
-    const varsMatch = targetMessage.match(/🔐 <b>Secrets:<\/b>[\s\S]*?<code>([\s\S]*?)<\/code>/);
+    // 🚀 التعديل السحري هنا: تجاوز اسم المطور والذهاب مباشرة لقسم الأكواد والأسرار
+    const codeMatch = targetMessage.match(/Code Block:[\s\S]*?<code[^>]*>([\s\S]*?)<\/code>/i);
+    const varsMatch = targetMessage.match(/Secrets:[\s\S]*?<code[^>]*>([\s\S]*?)<\/code>/i);
     
-    if (!codeMatch) throw new Error("لم يتم العثور على كود صالح");
+    if (!codeMatch) throw new Error("لم يتم العثور على كود برمجي صالح في الرسالة");
 
     const cleanCode = decodeHtml(codeMatch[1]);
     let secrets = {};
@@ -66,7 +60,7 @@ export default async function handler(req, res) {
         body: req.method === 'POST' ? JSON.stringify(req.body) : undefined
     });
 
-    // تشغيل الكود في Vercel (مسموح هنا بـ new Function)
+    // تشغيل الكود في Vercel بأمان تام
     const execute = new Function('env', 'project', 'request', 'Response', 'fetch', `return (async () => { \n${cleanCode}\n })();`);
     const result = await execute(secrets, { user_id: userId, name: projName }, webReq, Response, fetch);
     
