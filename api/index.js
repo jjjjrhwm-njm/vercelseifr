@@ -7,70 +7,122 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const urlParts = req.url.split('?')[0].split('/').filter(Boolean);
-  if (urlParts.length < 2) return res.status(200).send("<h1>Najm Engine v7.0 Ready 🚀</h1>");
+  if (urlParts.length < 2) {
+    return res.status(200).send("<h1>Najm Cloud v15.0 Engine Ready 🚀</h1>");
+  }
 
   const userId = decodeURIComponent(urlParts[0]);
   const projName = decodeURIComponent(urlParts[1]);
 
   try {
-    const html = await fetch(TELEGRAM_URL, { headers: { 'User-Agent': 'Mozilla/5.0' } }).then(r => r.text());
+    const html = await fetch(TELEGRAM_URL, { 
+      headers: { 'User-Agent': 'Mozilla/5.0' } 
+    }).then(r => r.text());
+    
     const messages = html.split('<div class="tgme_widget_message_text').reverse();
     let targetMessage = null;
 
     for (let msg of messages) {
-      if (msg.includes('---METADATA---')) {
-        const metaMatch = msg.match(/---METADATA---({[\s\S]*?})---METADATA---/);
-        if (metaMatch) {
-          const meta = JSON.parse(decodeHtml(metaMatch[1]));
-          if (meta.uid === userId && meta.pid === projName) {
-            targetMessage = msg;
-            break;
-          }
+      const bracketIdMatch = msg.match(/\[NAJM_ID:\s*([^\]]+)\]/i);
+      const bracketPrjMatch = msg.match(/\[NAJM_PRJ:\s*([^\]]+)\]/i);
+      
+      if (bracketIdMatch && bracketPrjMatch) {
+        const uid = bracketIdMatch[1].trim();
+        const pid = bracketPrjMatch[1].trim();
+        if (uid === userId && pid === projName) {
+          targetMessage = msg;
+          break;
         }
       }
     }
 
-    if (!targetMessage) return res.status(404).send("<h1>Project Not Found</h1>");
+    if (!targetMessage) {
+      return res.status(404).send("<h1>Project Not Found</h1><p>لم يتم العثور على المشروع</p>");
+    }
 
-    const codeMatch = targetMessage.match(/\[START_CODE\]([\s\S]*?)\[END_CODE\]/);
-    const varsMatch = targetMessage.match(/\[START_VARS\]([\s\S]*?)\[END_VARS\]/);
-    
-    if (!codeMatch) throw new Error("لم يتم العثور على منطقة الكود");
+    const payloadMatch = targetMessage.match(/\[NAJM_PAYLOAD_START\]([\s\S]*?)\[NAJM_PAYLOAD_END\]/i);
+    if (!payloadMatch) {
+      throw new Error("لم يتم العثور على الحزمة المشفرة");
+    }
 
-    // تنظيف الكود والأسرار باستخدام المنظف المطور
-    const cleanCode = decodeHtml(codeMatch[1]).trim();
-    const secrets = varsMatch ? JSON.parse(decodeHtml(varsMatch[1]).trim()) : {};
+    const base64Payload = payloadMatch[1].trim();
+    const decodedJson = safeBase64Decode(base64Payload);
+    if (!decodedJson) {
+      throw new Error("فشل فك تشفير Base64");
+    }
+
+    const payload = JSON.parse(decodedJson);
+    const cleanCode = payload.code || '';
+    const secrets = payload.vars || {};
 
     const fullUrl = 'https://' + req.headers.host + req.url;
     const webReq = {
-        url: fullUrl,
-        method: req.method,
-        headers: req.headers,
-        json: async () => req.body
+      url: fullUrl,
+      method: req.method,
+      headers: req.headers,
+      json: async () => req.body
     };
 
-    const execute = new Function('env', 'project', 'request', 'Response', 'fetch', "return (async () => { " + cleanCode + " })();");
+    const execute = new Function('env', 'project', 'request', 'Response', 'fetch', 
+      "return (async () => { " + cleanCode + " })();");
+    
     const result = await execute(secrets, { user_id: userId, name: projName }, webReq, Response, fetch);
     
     if (result instanceof Response) {
-        const text = await result.text();
-        result.headers.forEach((v, k) => res.setHeader(k, v));
-        return res.status(result.status).send(text);
+      const text = await result.text();
+      result.headers.forEach((v, k) => res.setHeader(k, v));
+      return res.status(result.status).send(text);
     }
-    return res.status(200).send(result || "Executed");
+    
+    return res.status(200).send(result || "Executed Successfully");
 
   } catch (e) {
+    console.error('Runner error:', e);
     return res.status(500).send("<h2>خطأ المحرك: " + e.message + "</h2>");
   }
 }
 
-// 🧼 وظيفة تنظيف HTML المطورة للتعامل مع رموز تليجرام الغريبة
-function decodeHtml(h) {
+function safeBase64Decode(base64Str) {
+  try {
+    let cleaned = base64Str.trim().replace(/\s/g, '');
+    cleaned = decodeHtmlEntities(cleaned);
+    const binaryString = atob(cleaned);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch (e) {
+    console.error('Base64 decode error:', e);
+    return null;
+  }
+}
+
+function decodeHtmlEntities(text, maxDepth = 5) {
+  if (!text || maxDepth === 0) return text || '';
+  let decoded = text;
   const entities = {
-    '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'",
-    '&#33;': '!', '&#039;': "'", '&#92;': '\\', '&nbsp;': ' ', '&#092;': '\\'
+    '&lt;': '<', '&gt;': '>', '&amp;': '&', '&quot;': '"',
+    '&#39;': "'", '&#x27;': "'", '&#x2F;': '/', '&#x60;': '`',
+    '&apos;': "'", '&nbsp;': ' ', '&#34;': '"', '&#38;': '&',
+    '&#60;': '<', '&#62;': '>', '&ldquo;': '"', '&rdquo;': '"'
   };
-  return h.replace(/<br\s*\/?>/gi, '\n')
-          .replace(/<[^>]*>/g, '')
-          .replace(/&[#0-9a-z]+;/gi, (entity) => entities[entity] || entity);
+  
+  let changed = false;
+  for (const [entity, char] of Object.entries(entities)) {
+    if (decoded.includes(entity)) {
+      decoded = decoded.replace(new RegExp(entity, 'g'), char);
+      changed = true;
+    }
+  }
+  
+  if (changed) {
+    return decodeHtmlEntities(decoded, maxDepth - 1);
+  }
+  
+  decoded = decoded.replace(/<br\s*\/?>/gi, '\n')
+                   .replace(/<[^>]*>/g, '')
+                   .replace(/[\u200B-\u200D\uFEFF]/g, '');
+  
+  return decoded;
 }
