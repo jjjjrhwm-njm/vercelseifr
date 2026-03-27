@@ -1,5 +1,5 @@
+// api/index.js - Vercel Serverless Function (Runner)
 export default async function handler(req, res) {
-  const TELEGRAM_URL = 'https://t.me/s/nejm_njm';
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -8,98 +8,122 @@ export default async function handler(req, res) {
 
   const urlParts = req.url.split('?')[0].split('/').filter(Boolean);
   if (urlParts.length < 2) {
-    return res.status(200).send("<h1>Najm Engine v16 Active 🚀</h1><p>Platform is running perfectly.</p>");
+    return res.status(200).send("<h1>Najm Cloud v15.0 Engine Ready 🚀</h1>");
   }
 
-  const targetUid = decodeURIComponent(urlParts[0]).toLowerCase().trim();
-  const targetPid = decodeURIComponent(urlParts[1]).trim();
-
-  // الدالة الكاسحة: تدمر أي HTML وتستخرج الـ JSON الصافي
-  function extractNajmPayloads(rawHtml) {
-    // 1. مسح جميع وسوم HTML بالكامل (دمج النصوص التي مزقها تليجرام)
-    let text = rawHtml.replace(/<[^>]+>/g, ' ');
-    // 2. فك تشفير الرموز
-    text = text.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'");
-    // 3. مسح المسافات الوهمية
-    text = text.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\s+/g, ' ');
-
-    const results = [];
-    const regex = /===NAJM_V16_START===\s*(.*?)\s*===NAJM_V16_END===/g;
-    let match;
-    
-    while ((match = regex.exec(text)) !== null) {
-      try {
-        let b64 = match[1].replace(/\s/g, ''); // تنظيف Base64 من أي مسافات
-        let decoded = decodeURIComponent(escape(Buffer.from(b64, 'base64').toString('binary')));
-        results.push(JSON.parse(decoded));
-      } catch(e) {
-        console.error('Failed to parse a payload block');
-      }
-    }
-    return results;
-  }
+  const userId = decodeURIComponent(urlParts[0]);
+  const projName = decodeURIComponent(urlParts[1]);
 
   try {
-    let targetProject = null;
-    let currentBeforeId = null;
-    let maxPages = 20; // يبحث في 20 صفحة متتالية في تليجرام
+    const TELEGRAM_URL = 'https://t.me/s/nejm_njm';
+    const html = await fetch(TELEGRAM_URL, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    }).then(r => r.text());
 
-    for (let i = 0; i < maxPages; i++) {
-      let fetchUrl = TELEGRAM_URL;
-      if (currentBeforeId) fetchUrl += `?before=${currentBeforeId}`;
-      
-      const html = await fetch(fetchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }).then(r => r.text());
-      
-      const payloads = extractNajmPayloads(html);
-      
-      // البحث عن المشروع المطلوب (نأخذ الأحدث لأننا نمسح من الجديد للقديم)
-      for (const p of payloads) {
-        if (p.uid === targetUid && p.pid === targetPid) {
-          if (!targetProject || p.timestamp > targetProject.timestamp) {
-            targetProject = p;
-          }
+    const messages = html.split('<div class="tgme_widget_message"');
+    let targetMessage = null;
+
+    for (let msg of messages) {
+      const bracketIdMatch = msg.match(/\[NAJM_ID:\s*([^\]]+)\]/i);
+      const bracketPrjMatch = msg.match(/\[NAJM_PRJ:\s*([^\]]+)\]/i);
+
+      if (bracketIdMatch && bracketPrjMatch) {
+        const uid = bracketIdMatch[1].trim();
+        const pid = bracketPrjMatch[1].trim();
+        if (uid === userId && pid === projName) {
+          targetMessage = msg;
+          break;
         }
       }
-
-      if (targetProject) break; // وجدنا المشروع، نوقف البحث
-
-      // استخراج رقم آخر رسالة للانتقال للصفحة السابقة
-      const postMatches = [...html.matchAll(/data-post="nejm_njm\/(\d+)"/g)];
-      if (postMatches.length > 0) {
-        currentBeforeId = Math.min(...postMatches.map(m => parseInt(m[1])));
-      } else {
-        break; // وصلنا لآخر القناة
-      }
     }
 
-    if (!targetProject) {
-      return res.status(404).send(`
-        <div style="font-family:sans-serif; text-align:center; padding:50px; color:#ff3366; background:#0f1020; height:100vh;">
-            <h1>Project Not Found / المشروع غير موجود</h1>
-            <p>تأكد من المعرف (${targetUid}) واسم المشروع (${targetPid})</p>
-        </div>
-      `);
+    if (!targetMessage) {
+      return res.status(404).send("<h1>Project Not Found</h1><p>لم يتم العثور على المشروع</p>");
     }
 
-    // تجهيز بيئة التشغيل
-    const cleanCode = targetProject.code || '';
-    const secrets = targetProject.vars || {};
+    const payloadMatch = targetMessage.match(/\[NAJM_PAYLOAD_START\]([\s\S]*?)\[NAJM_PAYLOAD_END\]/i);
+    if (!payloadMatch) {
+      throw new Error("لم يتم العثور على الحزمة المشفرة");
+    }
+
+    const base64Payload = payloadMatch[1].trim();
+    const decodedJson = safeBase64Decode(base64Payload);
+    if (!decodedJson) {
+      throw new Error("فشل فك تشفير Base64");
+    }
+
+    const payload = JSON.parse(decodedJson);
+    const cleanCode = payload.code || '';
+    const secrets = payload.vars || {};
+
     const fullUrl = 'https://' + req.headers.host + req.url;
-    const webReq = { url: fullUrl, method: req.method, headers: req.headers, json: async () => req.body };
+    const webReq = {
+      url: fullUrl,
+      method: req.method,
+      headers: req.headers,
+      json: async () => req.body
+    };
 
-    const execute = new Function('env', 'project', 'request', 'Response', 'fetch', "return (async () => { " + cleanCode + " })();");
-    const result = await execute(secrets, { user_id: targetUid, name: targetPid }, webReq, Response, fetch);
-    
+    const execute = new Function('env', 'project', 'request', 'Response', 'fetch',
+      "return (async () => { " + cleanCode + " })();");
+
+    const result = await execute(secrets, { user_id: userId, name: projName }, webReq, Response, fetch);
+
     if (result instanceof Response) {
       const text = await result.text();
       result.headers.forEach((v, k) => res.setHeader(k, v));
       return res.status(result.status).send(text);
     }
-    
+
     return res.status(200).send(result || "Executed Successfully");
 
   } catch (e) {
-    console.error('Vercel Runner Error:', e);
-    return res.status(500).send("<h2>خطأ في المحرك: " + e.message + "</h2>");
+    console.error('Runner error:', e);
+    return res.status(500).send("<h2>خطأ المحرك: " + e.message + "</h2>");
   }
+}
+
+function safeBase64Decode(base64Str) {
+  try {
+    let cleaned = base64Str.trim().replace(/\s/g, '');
+    cleaned = decodeHtmlEntities(cleaned);
+    const binaryString = atob(cleaned);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch (e) {
+    console.error('Base64 decode error:', e);
+    return null;
+  }
+}
+
+function decodeHtmlEntities(text, maxDepth = 5) {
+  if (!text || maxDepth === 0) return text || '';
+  let decoded = text;
+  const entities = {
+    '&lt;': '<', '&gt;': '>', '&amp;': '&', '&quot;': '"',
+    '&#39;': "'", '&#x27;': "'", '&#x2F;': '/', '&#x60;': '`',
+    '&apos;': "'", '&nbsp;': ' ', '&#34;': '"', '&#38;': '&',
+    '&#60;': '<', '&#62;': '>', '&ldquo;': '"', '&rdquo;': '"'
+  };
+
+  let changed = false;
+  for (const [entity, char] of Object.entries(entities)) {
+    if (decoded.includes(entity)) {
+      decoded = decoded.replace(new RegExp(entity, 'g'), char);
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    return decodeHtmlEntities(decoded, maxDepth - 1);
+  }
+
+  decoded = decoded.replace(/<br\s*\/?>/gi, '\n')
+                   .replace(/<[^>]*>/g, '')
+                   .replace(/[\u200B-\u200D\uFEFF]/g, '');
+
+  return decoded;
 }
