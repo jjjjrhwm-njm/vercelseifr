@@ -1,4 +1,3 @@
-// Vercel API - api/index.js
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -8,58 +7,31 @@ export default async function handler(req, res) {
 
   const urlParts = req.url.split('?')[0].split('/').filter(Boolean);
   if (urlParts.length < 2) {
-    return res.status(200).send("<h1>Najm Cloud v15.0 Engine Ready 🚀</h1>");
+    return res.status(200).send("<h1>Najm Cloud v17.0 Engine Ready 🚀</h1>");
   }
 
   const userId = decodeURIComponent(urlParts[0]);
   const projName = decodeURIComponent(urlParts[1]);
 
   try {
-    const TELEGRAM_URL = 'https://t.me/s/nejm_njm';
-    const html = await fetch(TELEGRAM_URL, {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    }).then(r => r.text());
-
-    // إضافة reverse() هنا لجلب أحدث نسخة مرفوعة من الكود
-    const messages = html.split('<div class="tgme_widget_message"').reverse();
-    let targetMessage = null;
-
-    for (let msg of messages) {
-      const bracketIdMatch = msg.match(/\[NAJM_ID:\s*([^\]]+)\]/i);
-      const bracketPrjMatch = msg.match(/\[NAJM_PRJ:\s*([^\]]+)\]/i);
-
-      if (bracketIdMatch && bracketPrjMatch) {
-        const uid = bracketIdMatch[1].trim();
-        const pid = bracketPrjMatch[1].trim();
-        if (uid === userId && pid === projName) {
-          targetMessage = msg;
-          break; // سيتوقف الآن عند أحدث إصدار للمشروع بشكل صحيح
-        }
-      }
+    // جلب الكود من قاعدة بيانات كلودفلير مباشرة
+    const apiUrl = `https://najm-backend.60jrhwm.workers.dev/get-code?user_id=${encodeURIComponent(userId)}&project_name=${encodeURIComponent(projName)}`;
+    
+    // منع الكاش
+    const nocache = Date.now() + Math.random();
+    const response = await fetch(`${apiUrl}&nocache=${nocache}`, { cache: 'no-store' });
+    
+    if (!response.ok) {
+      return res.status(404).send("<h1>Project Not Found</h1><p>لم يتم العثور على المشروع في قاعدة البيانات</p>");
     }
 
-    if (!targetMessage) {
-      return res.status(404).send("<h1>Project Not Found</h1><p>لم يتم العثور على المشروع</p>");
-    }
-
-    const payloadMatch = targetMessage.match(/\[NAJM_PAYLOAD_START\]([\s\S]*?)\[NAJM_PAYLOAD_END\]/i);
-    if (!payloadMatch) {
-      throw new Error("لم يتم العثور على الحزمة المشفرة");
-    }
-
-    const base64Payload = payloadMatch[1].trim();
-    const decodedJson = safeBase64Decode(base64Payload);
-    if (!decodedJson) {
-      throw new Error("فشل فك تشفير Base64");
-    }
-
-    const payload = JSON.parse(decodedJson);
+    const payload = await response.json();
     const cleanCode = payload.code || '';
     const secrets = payload.vars || {};
 
     const fullUrl = 'https://' + req.headers.host + req.url;
     
-    // تأمين الـ JSON للتعامل مع Webhook تليجرام بسلاسة
+    // تأمين الـ Webhook
     const webReq = {
       url: fullUrl,
       method: req.method,
@@ -84,49 +56,4 @@ export default async function handler(req, res) {
     console.error('Runner error:', e);
     return res.status(500).send("<h2>خطأ المحرك: " + e.message + "</h2>");
   }
-}
-
-function safeBase64Decode(base64Str) {
-  try {
-    let cleaned = base64Str.trim().replace(/\s/g, '');
-    cleaned = decodeHtmlEntities(cleaned);
-    const binaryString = atob(cleaned);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    return new TextDecoder('utf-8').decode(bytes);
-  } catch (e) {
-    console.error('Base64 decode error:', e);
-    return null;
-  }
-}
-
-function decodeHtmlEntities(text, maxDepth = 5) {
-  if (!text || maxDepth === 0) return text || '';
-  let decoded = text;
-  const entities = {
-    '&lt;': '<', '&gt;': '>', '&amp;': '&', '&quot;': '"',
-    '&#39;': "'", '&#x27;': "'", '&#x2F;': '/', '&#x60;': '`',
-    '&apos;': "'", '&nbsp;': ' ', '&#34;': '"', '&#38;': '&',
-    '&#60;': '<', '&#62;': '>', '&ldquo;': '"', '&rdquo;': '"'
-  };
-
-  let changed = false;
-  for (const [entity, char] of Object.entries(entities)) {
-    if (decoded.includes(entity)) {
-      decoded = decoded.replace(new RegExp(entity, 'g'), char);
-      changed = true;
-    }
-  }
-
-  if (changed) {
-    return decodeHtmlEntities(decoded, maxDepth - 1);
-  }
-
-  decoded = decoded.replace(/<br\s*\/?>/gi, '\n')
-                   .replace(/<[^>]*>/g, '')
-                   .replace(/[\u200B-\u200D\uFEFF]/g, '');
-
-  return decoded;
 }
