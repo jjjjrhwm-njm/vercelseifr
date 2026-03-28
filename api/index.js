@@ -20,7 +20,8 @@ export default async function handler(req, res) {
       headers: { 'User-Agent': 'Mozilla/5.0' }
     }).then(r => r.text());
 
-    const messages = html.split('<div class="tgme_widget_message"');
+    // إضافة reverse() هنا لجلب أحدث نسخة مرفوعة من الكود
+    const messages = html.split('<div class="tgme_widget_message"').reverse();
     let targetMessage = null;
 
     for (let msg of messages) {
@@ -32,7 +33,7 @@ export default async function handler(req, res) {
         const pid = bracketPrjMatch[1].trim();
         if (uid === userId && pid === projName) {
           targetMessage = msg;
-          break;
+          break; // سيتوقف الآن عند أحدث إصدار للمشروع بشكل صحيح
         }
       }
     }
@@ -57,11 +58,13 @@ export default async function handler(req, res) {
     const secrets = payload.vars || {};
 
     const fullUrl = 'https://' + req.headers.host + req.url;
+    
+    // تأمين الـ JSON للتعامل مع Webhook تليجرام بسلاسة
     const webReq = {
       url: fullUrl,
       method: req.method,
       headers: req.headers,
-      json: async () => req.body
+      json: async () => (typeof req.body === 'string' ? JSON.parse(req.body) : req.body)
     };
 
     const execute = new Function('env', 'project', 'request', 'Response', 'fetch',
