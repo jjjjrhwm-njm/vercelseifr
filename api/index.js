@@ -7,31 +7,42 @@ export default async function handler(req, res) {
 
   const urlParts = req.url.split('?')[0].split('/').filter(Boolean);
   if (urlParts.length < 2) {
-    return res.status(200).send("<h1>Najm Cloud v17.0 Engine Ready 🚀</h1>");
+    return res.status(200).send("<h1>Najm Cloud v17.0 IDE Engine Ready 🚀</h1>");
   }
 
   const userId = decodeURIComponent(urlParts[0]);
   const projName = decodeURIComponent(urlParts[1]);
 
   try {
-    // جلب الكود من قاعدة بيانات كلودفلير مباشرة
     const apiUrl = `https://najm-backend.60jrhwm.workers.dev/get-code?user_id=${encodeURIComponent(userId)}&project_name=${encodeURIComponent(projName)}`;
-    
-    // منع الكاش
     const nocache = Date.now() + Math.random();
     const response = await fetch(`${apiUrl}&nocache=${nocache}`, { cache: 'no-store' });
     
     if (!response.ok) {
-      return res.status(404).send("<h1>Project Not Found</h1><p>لم يتم العثور على المشروع في قاعدة البيانات</p>");
+      return res.status(404).send("<h1>Project Not Found</h1><p>لم يتم العثور على المشروع</p>");
     }
 
     const payload = await response.json();
-    const cleanCode = payload.code || '';
+    let rawCode = payload.code || '';
     const secrets = payload.vars || {};
+    
+    let executableCode = rawCode;
+    let fileSystem = {};
+
+    // 💡 الذكاء الجديد: محاولة قراءة نظام الملفات (JSON)
+    try {
+      const parsed = JSON.parse(rawCode);
+      if (parsed && typeof parsed === 'object') {
+        fileSystem = parsed;
+        // البحث عن الملف الرئيسي لتشغيله
+        executableCode = parsed['index.js'] || parsed['main.js'] || parsed['app.js'] || '';
+      }
+    } catch (e) {
+      // إذا كان كود قديم (نص عادي)، شغله زي ما هو
+      executableCode = rawCode;
+    }
 
     const fullUrl = 'https://' + req.headers.host + req.url;
-    
-    // تأمين الـ Webhook
     const webReq = {
       url: fullUrl,
       method: req.method,
@@ -39,10 +50,11 @@ export default async function handler(req, res) {
       json: async () => (typeof req.body === 'string' ? JSON.parse(req.body) : req.body)
     };
 
-    const execute = new Function('env', 'project', 'request', 'Response', 'fetch',
-      "return (async () => { " + cleanCode + " })();");
+    // إضافة fileSystem للبيئة عشان لو الكود يبي يقرأ ملفات ثانية
+    const execute = new Function('env', 'project', 'request', 'Response', 'fetch', 'fs',
+      "return (async () => { " + executableCode + " })();");
 
-    const result = await execute(secrets, { user_id: userId, name: projName }, webReq, Response, fetch);
+    const result = await execute(secrets, { user_id: userId, name: projName }, webReq, Response, fetch, fileSystem);
 
     if (result instanceof Response) {
       const text = await result.text();
